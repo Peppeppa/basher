@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# bin/basher - Haupt-Entrypoint / Dispatcher
+#
+# Siehe Architekturplan Abschnitt 1.4: bin/basher enthält selbst keine
+# Befehlslogik. Es lädt lib/*.sh + lib/commands/*.sh und ruft dann die
+# passende cmd_<name>()-Funktion auf. Neue Befehle = neue Datei unter
+# lib/commands/, kein Anfassen dieser Datei nötig.
+
+set -uo pipefail
+
+BASHER_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BASHER_LIB_DIR="$BASHER_HOME/lib"
+
+# --- Bibliotheken laden -----------------------------------------------
+# shellcheck source=/dev/null
+source "$BASHER_LIB_DIR/config.sh"
+# shellcheck source=/dev/null
+source "$BASHER_LIB_DIR/checks.sh"
+# shellcheck source=/dev/null
+source "$BASHER_LIB_DIR/core.sh"
+# shellcheck source=/dev/null
+source "$BASHER_LIB_DIR/repo.sh"
+# shellcheck source=/dev/null
+source "$BASHER_LIB_DIR/manifest.sh"
+# shellcheck source=/dev/null
+source "$BASHER_LIB_DIR/remote.sh"
+
+# --- Subcommands laden (1 Datei je Befehl) -----------------------------
+for cmd_file in "$BASHER_LIB_DIR"/commands/*.sh; do
+    [ -e "$cmd_file" ] || continue
+    # shellcheck source=/dev/null
+    source "$cmd_file"
+done
+
+# --- Config laden (legt sie bei Bedarf mit Defaults an, s. 2.3) --------
+basher_config_load
+
+# --- Befehl auflösen -----------------------------------------------------
+if [ "$#" -gt 0 ]; then
+    cmd="cmd_$1"
+    shift
+else
+    # Kein Argument -> Menü (nur Voll-Modus, s. 5.4). Guard in cmd_menu
+    # selbst wirft im Minimal-Modus eine passende Fehlermeldung.
+    cmd="cmd_menu"
+fi
+
+if declare -f "$cmd" > /dev/null 2>&1; then
+    "$cmd" "$@"
+else
+    echo "basher: Unbekannter Befehl '${cmd#cmd_}'" >&2
+    available="$(compgen -A function | grep '^cmd_' | sed 's/^cmd_//' | sort | tr '\n' ' ')"
+    echo "Verfügbare Befehle: $available" >&2
+    exit 1
+fi
