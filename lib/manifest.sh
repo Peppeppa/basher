@@ -4,7 +4,24 @@
 BASHER_MANIFEST_HEADER="# basher-manifest v1"
 
 basher_manifest_path() {
-    printf '%s\n' "$1/manifest.idx"
+    printf '%s/manifest.idx\n' "${1%/}"
+}
+
+# Normalisiert einen Manifest-Eintrag auf einen Pfad relativ zum Repo. Das
+# hält auch Manifeste nutzbar, die mit einer älteren Version und einem
+# REPO_PATH mit abschließendem Slash als absolute Pfade geschrieben wurden.
+basher_manifest_relpath() {
+    local repo_path="${1%/}" path="$2" relpath
+    case "$path" in
+        "$repo_path"/*)
+            relpath="${path#"$repo_path"/}"
+            # Fängt doppelte Trenner an der Repo-Grenze ab, die ältere
+            # Versionen bei einem REPO_PATH mit abschließendem Slash erzeugten.
+            while [[ "$relpath" == /* ]]; do relpath="${relpath#/}"; done
+            printf '%s\n' "$relpath"
+            ;;
+        *) printf '%s\n' "$path" ;;
+    esac
 }
 
 basher_manifest_ensure() {
@@ -21,14 +38,21 @@ basher_manifest_add() {
 
     basher_manifest_ensure "$repo_path"
     manifest="$(basher_manifest_path "$repo_path")"
-    relpath="${script_path#"$repo_path"/}"
+    relpath="$(basher_manifest_relpath "$repo_path" "$script_path")"
 
     tmp="$(mktemp)"
-    awk -v rp="$relpath" -v desc="$description" -F'|' '
+    awk -v rp="$relpath" -v desc="$description" -v root="${repo_path%/}/" -F'|' '
         BEGIN { OFS="|"; found=0 }
         /^#/ { print; next }
         NF==0 { next }
-        $1 == rp { print rp, desc; found=1; next }
+        {
+            stored=$1
+            if (index(stored, root) == 1) {
+                stored=substr(stored, length(root) + 1)
+                sub(/^\/+/, "", stored)
+            }
+        }
+        stored == rp { print rp, desc; found=1; next }
         { print }
         END { if (!found) print rp, desc }
     ' "$manifest" > "$tmp" && mv "$tmp" "$manifest"
@@ -38,7 +62,15 @@ basher_manifest_get_description() {
     local repo_path="$1" relpath="$2" manifest
     manifest="$(basher_manifest_path "$repo_path")"
     [ -f "$manifest" ] || { echo ""; return 0; }
-    awk -F'|' -v rp="$relpath" '$1==rp {print $2; found=1} END{if(!found) print ""}' "$manifest"
+    local key desc normalized
+    while IFS='|' read -r key desc; do
+        normalized="$(basher_manifest_relpath "$repo_path" "$key")"
+        if [ "$normalized" = "$relpath" ]; then
+            printf '%s\n' "$desc"
+            return 0
+        fi
+    done < "$manifest"
+    echo ""
 }
 
 # Löst eine Nutzereingabe (Name oder Pfad, mit/ohne .sh) zu genau einem
@@ -59,6 +91,7 @@ basher_manifest_resolve() {
     while IFS='|' read -r key desc; do
         [ -z "$key" ] && continue
         [[ "$key" == \#* ]] && continue
+        key="$(basher_manifest_relpath "$repo_path" "$key")"
         key_noext="${key%.sh}"
         if [ "$key_noext" = "$query" ]; then
             exact+=("$key")
@@ -124,7 +157,7 @@ basher_manifest_disambiguate() {
 # Nützlich, um ein bereits per Ordnerstruktur kategorisiertes Repo (das noch
 # kein manifest.idx hat) basher-tauglich zu machen.
 basher_manifest_scan() {
-    local repo_path="$1"
+    local repo_path="${1%/}"
     [ -d "$repo_path" ] || basher_die "'$repo_path' existiert nicht."
 
     basher_manifest_ensure "$repo_path"
@@ -134,7 +167,7 @@ basher_manifest_scan() {
     local found_file rel
     local -A on_disk=()
     while IFS= read -r -d '' found_file; do
-        rel="${found_file#"$repo_path"/}"
+        rel="$(basher_manifest_relpath "$repo_path" "$found_file")"
         on_disk["$rel"]=1
     done < <(find "$repo_path" -type f -name '*.sh' -not -path '*/.*' -print0)
 
@@ -143,6 +176,7 @@ basher_manifest_scan() {
     while IFS='|' read -r key desc; do
         [ -z "$key" ] && continue
         [[ "$key" == \#* ]] && continue
+        key="$(basher_manifest_relpath "$repo_path" "$key")"
         existing_desc["$key"]="$desc"
     done < "$manifest"
 

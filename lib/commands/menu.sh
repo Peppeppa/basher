@@ -20,8 +20,18 @@ cmd_menu() {
 
     local selection action key
     selection="$(
-        grep -v '^#' "$manifest" | grep -v '^$' | sort -t'|' -k1,1 |
-        awk -F'|' '{ printf "%s\t%s\n", $1, $2 }' |
+        while IFS='|' read -r manifest_key description; do
+            [ -z "$manifest_key" ] && continue
+            [[ "$manifest_key" == \#* ]] && continue
+
+            # Normalerweise enthält das Manifest bereits relative Pfade. Für
+            # ältere/manuell gepflegte Manifeste schneiden wir REPO_PATH hier
+            # ebenfalls ab, damit fzf nie den kompletten absoluten Pfad zeigt.
+            key="$(basher_manifest_relpath "$REPO_PATH" "$manifest_key")"
+
+            printf '%s\t%s\n' "$key" "$description"
+        done < "$manifest" |
+        sort -t$'\t' -k1,1 |
         fzf --delimiter='\t' --with-nth=1,2 \
             --prompt="basher> " \
             --header="Enter=ausführen  Ctrl-E=bearbeiten  Esc=abbrechen" \

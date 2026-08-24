@@ -2,7 +2,7 @@
 # lib/commands/new.sh - basher new [name] [--category <pfad>], s. 5.2
 
 cmd_new() {
-    local name="" category=""
+    local name="" category="" category_given=false
 
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -10,6 +10,7 @@ cmd_new() {
                 shift
                 [ "$#" -ge 1 ] || basher_die "Nutzung: --category <pfad>"
                 category="$1"
+                category_given=true
                 shift
                 ;;
             --*)
@@ -32,10 +33,15 @@ cmd_new() {
     fi
     name="${name%.sh}"
 
-    mkdir -p "$REPO_PATH" || basher_die "Konnte REPO_PATH '$REPO_PATH' nicht anlegen."
+    if [ "$category_given" = "false" ]; then
+        read -r -p "Unterordner im Script-Repo (z.B. system/backup, leer = Wurzel): " category
+    fi
 
-    local target_dir="$REPO_PATH"
-    [ -n "$category" ] && target_dir="$REPO_PATH/$category"
+    local repo_root="${REPO_PATH%/}"
+    mkdir -p "$repo_root" || basher_die "Konnte REPO_PATH '$REPO_PATH' nicht anlegen."
+
+    local target_dir="$repo_root"
+    [ -n "$category" ] && target_dir="$repo_root/$category"
     mkdir -p "$target_dir" || basher_die "Konnte Kategorie-Pfad '$target_dir' nicht anlegen."
 
     local script_path="$target_dir/${name}.sh"

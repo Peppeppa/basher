@@ -14,6 +14,7 @@ cmd_list() {
     while IFS='|' read -r key desc; do
         [ -z "$key" ] && continue
         [[ "$key" == \#* ]] && continue
+        key="$(basher_manifest_relpath "$REPO_PATH" "$key")"
 
         dir="$(dirname "$key")"
         base="$(basename "$key")"
