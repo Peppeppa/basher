@@ -21,7 +21,7 @@ jedem Server ohne vorherige Installation.
 ### Voll (lokal, mit Menü)
 
 ```bash
-git clone <REPO-URL> basher
+git clone https://github.com/Peppeppa/basher.git
 cd basher
 ./install.sh --full
 ```
@@ -29,11 +29,30 @@ cd basher
 Richtet einen Wrapper unter `~/.local/bin/basher` ein (kein `sudo`, kein Symlink) und installiert
 `fzf`, falls nicht schon vorhanden.
 
-### Minimal (z. B. Headless-Server, ohne Installation)
+### Minimal (lokal installiert, ohne fzf)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<user>/basher/main/minimal/basher-minimal.sh \
+git clone https://github.com/Peppeppa/basher.git
+cd basher
+./install.sh --minimal
+```
+
+Gleicher Wrapper unter `~/.local/bin/basher`, aber ohne `fzf`-Abhängigkeit – geeignet für Server,
+auf denen kein interaktives Menü gebraucht wird.
+
+### Ohne Installation (curl-Direktausführung, z. B. Headless-Server)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Peppeppa/basher/master/minimal/basher-minimal.sh \
   | bash -s -- <befehl>
+```
+
+Läuft direkt aus dem Repo heraus, ganz ohne lokale Installation – ideal für einmalige Nutzung auf
+einem fremden Server. Funktioniert auch gegen ein beliebiges anderes öffentliches Script-Repo:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Peppeppa/basher/master/minimal/basher-minimal.sh \
+  | bash -s -- run <script> --repo <anderer-user>/<script-repo>
 ```
 
 ## Befehle
