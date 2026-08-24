@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # lib/config.sh - Config laden, Defaults setzen, lesen/schreiben
 #
-# Siehe Architekturplan Abschnitt 2. Format: einfache KEY="value"-Datei,
-# direkt in Bash sourcebar (kein YAML/JSON-Parser -> Minimal-Modus-tauglich).
+# Siehe Architekturplan Abschnitt 2. Format: Bash-kompatible KEY=VALUE-Datei,
+# direkt sourcebar. Schreibzugriffe quotieren Werte mit printf %q, damit
+# Sonderzeichen nicht ausgewertet werden (kein externer Parser nötig).
 
 BASHER_CONFIG_DIR="${BASHER_CONFIG_DIR:-$HOME/.config/basher}"
 BASHER_CONFIG_FILE="${BASHER_CONFIG_FILE:-$BASHER_CONFIG_DIR/config}"
@@ -61,7 +62,7 @@ basher_config_write_defaults() {
         echo "# basher config - siehe docs/architecture.md Abschnitt 2.2"
         local key
         for key in "${BASHER_DEFAULT_KEYS[@]}"; do
-            printf '%s="%s"\n' "$key" "$(basher_config_default "$key")"
+            printf '%s=%q\n' "$key" "$(basher_config_default "$key")"
         done
     } > "$BASHER_CONFIG_FILE"
 }
@@ -71,6 +72,10 @@ basher_config_write_defaults() {
 # Begründung in BASHER_CONFIG_VALIDATE_MSG, Rückgabewert 1.
 basher_config_validate() {
     local key="$1" value="$2"
+    if ! [[ "$key" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+        BASHER_CONFIG_VALIDATE_MSG="Ungültiger Config-Key '$key' (erwartet: gültiger Bash-Variablenname)"
+        return 1
+    fi
     case "$key" in
         AUTO_SYNTAX_CHECK|AUTO_COMMIT)
             [[ "$value" == "true" || "$value" == "false" ]] && return 0
@@ -112,7 +117,7 @@ basher_config_load() {
     local key missing=0
     for key in "${BASHER_DEFAULT_KEYS[@]}"; do
         if ! grep -q "^${key}=" "$BASHER_CONFIG_FILE" 2>/dev/null; then
-            printf '%s="%s"\n' "$key" "$(basher_config_default "$key")" >> "$BASHER_CONFIG_FILE"
+            printf '%s=%q\n' "$key" "$(basher_config_default "$key")" >> "$BASHER_CONFIG_FILE"
             missing=1
         fi
     done
@@ -127,7 +132,28 @@ basher_config_load() {
 
 basher_config_get() {
     local key="$1"
+    [[ "$key" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || basher_die "Ungültiger Config-Key '$key'."
     printf '%s\n' "${!key:-}"
+}
+
+# Setzt eine Bash-Zuweisung in einer Datei, ohne den Wert selbst als Code zu
+# interpretieren. printf %q ist Bash-intern und bleibt damit minimal-tauglich.
+basher_assignment_set_in_file() {
+    local file="$1" key="$2" value="$3" tmp encoded found=false line
+    printf -v encoded '%q' "$value"
+    tmp="$(mktemp)"
+
+    {
+        while IFS= read -r line || [ -n "$line" ]; do
+            if [[ "$line" == "$key="* ]]; then
+                printf '%s=%s\n' "$key" "$encoded"
+                found=true
+            else
+                printf '%s\n' "$line"
+            fi
+        done < "$file"
+        [ "$found" = "true" ] || printf '%s=%s\n' "$key" "$encoded"
+    } > "$tmp" && mv "$tmp" "$file"
 }
 
 # Schreibt einen Key persistent in die Config-Datei UND setzt ihn in der
@@ -144,17 +170,7 @@ basher_config_set() {
         basher_config_write_defaults
     fi
 
-    if grep -q "^${key}=" "$BASHER_CONFIG_FILE"; then
-        local tmp
-        tmp="$(mktemp)"
-        awk -v k="$key" -v v="$value" '
-            BEGIN { FS="="; OFS="=" }
-            $1 == k { print k"=\""v"\""; next }
-            { print }
-        ' "$BASHER_CONFIG_FILE" > "$tmp" && mv "$tmp" "$BASHER_CONFIG_FILE"
-    else
-        printf '%s="%s"\n' "$key" "$value" >> "$BASHER_CONFIG_FILE"
-    fi
+    basher_assignment_set_in_file "$BASHER_CONFIG_FILE" "$key" "$value"
 
     declare -g "$key=$value"
 }

@@ -107,18 +107,14 @@ basher_secrets_edit() {
 }
 
 basher_secrets_set_in_file() {
-    local file="$1" key="$2" value="$3" tmp
-    tmp="$(mktemp)"
-    awk -v k="$key" -v v="$value" -F'=' '
-        BEGIN { OFS="="; found=0 }
-        $1 == k { print k, "\"" v "\""; found=1; next }
-        { print }
-        END { if (!found) print k "=\"" v "\"" }
-    ' "$file" > "$tmp" && mv "$tmp" "$file"
+    local file="$1" key="$2" value="$3"
+    basher_assignment_set_in_file "$file" "$key" "$value"
 }
 
 basher_secrets_set() {
     local key="$1" value="$2" path
+    [[ "$key" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || \
+        basher_die "Ungültiger Secret-Key '$key' (erwartet: gültiger Bash-Variablenname)."
     path="$(basher_secrets_path)"
 
     if [ "${SECRETS_MODE:-plain}" = "gpg" ]; then
@@ -141,19 +137,32 @@ basher_secrets_set() {
 }
 
 basher_secrets_get() {
-    local key="$1" path value
+    local key="$1" path
+    [[ "$key" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || basher_die "Ungültiger Secret-Key '$key'."
     path="$(basher_secrets_path)"
     [ -f "$path" ] || basher_die "Keine Secrets-Datei vorhanden."
     basher_secrets_check_perms
 
     if [ "${SECRETS_MODE:-plain}" = "gpg" ]; then
-        value="$(gpg -d --quiet "$path" 2>/dev/null | awk -F'=' -v k="$key" '$1==k{sub(/^[^=]*=/,""); gsub(/^"|"$/,""); print; exit}')"
+        command -v gpg > /dev/null 2>&1 || basher_die "gpg nicht gefunden."
+        if ! gpg -d --quiet "$path" 2>/dev/null | bash -c '
+            key="$1"
+            source /dev/stdin
+            [[ -v $key ]] || exit 1
+            printf "%s\n" "${!key}"
+        ' _ "$key"; then
+            basher_die "Kein Secret mit Key '$key' gefunden."
+        fi
     else
-        value="$(awk -F'=' -v k="$key" '$1==k{sub(/^[^=]*=/,""); gsub(/^"|"$/,""); print; exit}' "$path")"
+        if ! (
+            # shellcheck source=/dev/null
+            source "$path"
+            [[ -v $key ]] || exit 1
+            printf '%s\n' "${!key}"
+        ); then
+            basher_die "Kein Secret mit Key '$key' gefunden."
+        fi
     fi
-
-    [ -n "$value" ] || basher_die "Kein Secret mit Key '$key' gefunden."
-    printf '%s\n' "$value"
 }
 
 basher_secrets_list_keys() {
