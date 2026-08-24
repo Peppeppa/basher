@@ -7,6 +7,16 @@
 
 basher_die() {
     echo "basher: $*" >&2
+    # exit allein reicht nicht: wird basher_die aus einer Funktion heraus
+    # aufgerufen, die per $(...) eingebunden ist (z.B. editor="$(basher_resolve_editor)"),
+    # würde ein simples 'exit' nur die Subshell der Command-Substitution
+    # beenden - das Hauptskript liefe mit einem leeren Rückgabewert einfach
+    # weiter, statt abzubrechen. $$ referenziert laut Bash-Doku auch innerhalb
+    # von Subshells immer die PID des äußersten Skripts, daher beendet
+    # 'kill -s TERM "$$"' + der TERM-Trap (s. bin/basher) zuverlässig das
+    # gesamte Skript, unabhängig davon, aus welcher Verschachtelungstiefe
+    # basher_die aufgerufen wird.
+    kill -s TERM "$$" 2>/dev/null
     exit 1
 }
 

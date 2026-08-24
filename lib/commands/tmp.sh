@@ -59,6 +59,7 @@ basher_tmp_run_loop() {
     case "$answer" in
         j|J)
             while true; do
+                basher_secrets_load
                 bash "$file"
                 echo "basher: Script beendet (exit $?)."
                 read -r -p "Nochmal ausführen? [j/N]: " answer

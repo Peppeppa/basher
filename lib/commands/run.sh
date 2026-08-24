@@ -44,11 +44,12 @@ basher_run_local() {
     shift
     local relpath
     relpath="$(basher_manifest_resolve "$REPO_PATH" "$query")"
-    [ -n "$relpath" ] || basher_die "Kein eindeutiges Script für '$query' gefunden (s. 'basher list')."
+    [ -n "$relpath" ] || basher_die "Kein Script für '$query' gefunden oder Auswahl abgebrochen (s. 'basher list')."
 
     local script_path="$REPO_PATH/$relpath"
     [ -f "$script_path" ] || basher_die "'$script_path' existiert nicht (Manifest evtl. veraltet - 'basher repo scan' ausführen)."
 
+    basher_secrets_load
     bash "$script_path" "$@"
 }
 
@@ -68,11 +69,12 @@ basher_run_remote() {
 
     local relpath
     relpath="$(basher_manifest_resolve "$tmp_dir" "$query")"
-    [ -n "$relpath" ] || basher_die "Kein eindeutiges Script für '$query' in '$repo_ref' gefunden."
+    [ -n "$relpath" ] || basher_die "Kein Script für '$query' in '$repo_ref' gefunden oder Auswahl abgebrochen."
 
     local script_tmp="$tmp_dir/script.sh"
     basher_remote_fetch_branch "$repo_ref" "$relpath" "$script_tmp" "$branch" || \
         basher_die "Konnte '$relpath' nicht von '$repo_ref' ($branch) laden."
 
+    basher_secrets_load
     bash "$script_tmp" "$@"
 }

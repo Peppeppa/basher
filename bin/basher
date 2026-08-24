@@ -8,6 +8,11 @@
 
 set -uo pipefail
 
+# Fängt das Signal ab, das basher_die() per 'kill -s TERM "$$"' schickt, damit
+# ein basher_die-Aufruf aus tief verschachtelten Command-Substitutions heraus
+# zuverlässig das ganze Skript beendet (s. Kommentar in lib/checks.sh).
+trap 'exit 1' TERM
+
 BASHER_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BASHER_LIB_DIR="$BASHER_HOME/lib"
 
@@ -24,6 +29,8 @@ source "$BASHER_LIB_DIR/repo.sh"
 source "$BASHER_LIB_DIR/manifest.sh"
 # shellcheck source=/dev/null
 source "$BASHER_LIB_DIR/remote.sh"
+# shellcheck source=/dev/null
+source "$BASHER_LIB_DIR/secrets.sh"
 
 # --- Subcommands laden (1 Datei je Befehl) -----------------------------
 for cmd_file in "$BASHER_LIB_DIR"/commands/*.sh; do

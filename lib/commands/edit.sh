@@ -13,7 +13,7 @@ cmd_edit() {
     else
         relpath="$(basher_manifest_resolve "$REPO_PATH" "$query")"
         if [ -z "$relpath" ]; then
-            basher_die "Kein eindeutiges Script für '$query' gefunden (s. 'basher list')."
+            basher_die "Kein Script für '$query' gefunden oder Auswahl abgebrochen (s. 'basher list')."
         fi
     fi
 

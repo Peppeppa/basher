@@ -67,19 +67,54 @@ basher_manifest_resolve() {
         fi
     done < "$manifest"
 
-    if [ "${#exact[@]}" -eq 1 ]; then
-        printf '%s\n' "${exact[0]}"
-        return 0
-    elif [ "${#exact[@]}" -eq 0 ] && [ "${#partial[@]}" -eq 1 ]; then
-        printf '%s\n' "${partial[0]}"
-        return 0
-    elif [ "${#exact[@]}" -gt 1 ] || [ "${#partial[@]}" -gt 1 ]; then
-        echo "basher: Mehrdeutig - mehrere Treffer für '$query':" >&2
-        printf '  %s\n' "${exact[@]}" "${partial[@]}" >&2
-        return 1
+    local -a candidates=()
+    if [ "${#exact[@]}" -gt 0 ]; then
+        candidates=("${exact[@]}")
     else
-        return 1
+        candidates=("${partial[@]}")
     fi
+
+    case "${#candidates[@]}" in
+        0) return 1 ;;
+        1) printf '%s\n' "${candidates[0]}"; return 0 ;;
+        *) basher_manifest_disambiguate "$repo_path" "${candidates[@]}" ;;
+    esac
+}
+
+# Mehrere Treffer für denselben Namen (s. Backlog 9.1, z.B. zwei
+# dracut-install.sh in unterschiedlichen Kategorien): statt abzubrechen wird
+# eine Auswahl angeboten. Im Voll-Modus per fzf (mit Preview), sonst - und
+# damit auch im Minimal-/curl-Fall - eine simple nummerierte Liste per read.
+# Gibt bei Auswahl den gewählten relativen Pfad auf stdout aus, sonst 1
+# (Abbruch/ungültige Eingabe - vom Aufrufer wie "nicht gefunden" behandelt).
+basher_manifest_disambiguate() {
+    local repo_path="$1"
+    shift
+    local -a candidates=("$@")
+
+    if [ "${INSTALL_MODE:-}" = "full" ] && command -v fzf > /dev/null 2>&1; then
+        local preview_cmd="cat '$repo_path'/{} 2>/dev/null"
+        printf '%s\n' "${candidates[@]}" |
+            fzf --prompt="Mehrdeutig, bitte wählen> " --preview="$preview_cmd"
+        return $?
+    fi
+
+    echo "basher: Mehrere Treffer - bitte auswählen:" >&2
+    local i=1 c
+    for c in "${candidates[@]}"; do
+        echo "  $i) $c" >&2
+        i=$((i + 1))
+    done
+
+    local choice
+    read -r -p "Auswahl [1-${#candidates[@]}]: " choice
+
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#candidates[@]}" ]; then
+        printf '%s\n' "${candidates[$((choice - 1))]}"
+        return 0
+    fi
+
+    return 1
 }
 
 # Durchsucht repo_path rekursiv nach *.sh-Dateien und gleicht das Manifest ab:
