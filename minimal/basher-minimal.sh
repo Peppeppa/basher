@@ -3,7 +3,7 @@
 # NICHT VON HAND BEARBEITEN - Änderungen gehen bei der nächsten Generierung
 # verloren. Quelle der Wahrheit: lib/*.sh in diesem Repo.
 #
-# Generiert am 2026-08-24T10:01:38Z
+# Generiert am 2026-08-24T12:01:50Z
 
 set -uo pipefail
 trap 'exit 1' TERM  # s. Kommentar zu basher_die in lib/checks.sh
@@ -46,6 +46,21 @@ basher_config_default() {
         SYNC_MODE)         echo "auto" ;;
         SECRETS_MODE)      echo "plain" ;;
         SECRETS_FILE)      echo "$BASHER_CONFIG_DIR/secrets.env" ;;
+        *)                 echo "" ;;
+    esac
+}
+
+# Kurze, für den interaktiven Walkthrough gedachte Erklärung pro Key.
+basher_config_hint() {
+    case "$1" in
+        REPO_PATH)         echo "Lokaler Pfad zu deinem Script-Repo. Du kannst hier auch eine Git-URL (https://... oder git@...) eingeben - wird dann automatisch geklont bzw. als Remote verknüpft." ;;
+        EDITOR_CMD)        echo "Editor-Override. Leer lassen, um automatisch \$EDITOR bzw. nvim/vim/vi zu verwenden." ;;
+        TMP_DIR)           echo "Ablageort für Wegwerf-Scripts ('basher tmp'). Landet nie im Script-Repo." ;;
+        AUTO_SYNTAX_CHECK) echo "Prüft Tmp-Scripts vor der Ausführung mit 'bash -n' (nur Warnung, kein Blocker). true/false." ;;
+        AUTO_COMMIT)       echo "Committet nach 'new'/'edit' automatisch lokal (und bei SYNC_MODE=auto zusätzlich automatisch push). true/false." ;;
+        SYNC_MODE)         echo "'auto' synchronisiert Git automatisch (pull+push), 'pro' zeigt nur den Status und überlässt dir die Kontrolle." ;;
+        SECRETS_MODE)      echo "'plain' speichert Secrets im Klartext, 'gpg' verschlüsselt sie. Wechsel jederzeit über 'basher secrets encrypt/decrypt'." ;;
+        SECRETS_FILE)      echo "Pfad zur Secrets-Datei (Klartext-Variante; im gpg-Modus wird automatisch .gpg angehängt)." ;;
         *)                 echo "" ;;
     esac
 }
@@ -219,6 +234,14 @@ require_gpg() {
 # lib/core.sh - gemeinsame Hilfsfunktionen, die von mehreren Befehlen genutzt werden.
 # Setzt lib/checks.sh voraus (basher_die), s. Ladereihenfolge in bin/basher.
 
+# ANSI-Bold für Default-Werte in interaktiven Prompts - macht überall
+# einheitlich sichtbar, welcher Wert bei leerer Eingabe (Enter) übernommen
+# wird, statt das umständlich in Prompt-Text auszuformulieren (z.B.
+# "Enter=https").
+basher_bold() {
+    printf '\033[1m%s\033[0m' "$1"
+}
+
 # Fallback-Kette aus 1.3: EDITOR_CMD (Config) -> $EDITOR (Env) -> nvim -> vim -> vi.
 # Gibt den ersten tatsächlich vorhandenen Editor-Befehl auf stdout aus.
 basher_resolve_editor() {
@@ -240,6 +263,115 @@ basher_resolve_editor() {
 basher_repo_is_git() {
     local repo_path="$1"
     [ -d "$repo_path/.git" ]
+}
+
+# Erkennt, ob eine Eingabe eine Git-URL ist (https://, git://, ssh://, oder
+# das kurze git@host:pfad-Format) statt eines lokalen Pfads.
+basher_looks_like_git_url() {
+    case "$1" in
+        https://*|http://*|git://*|ssh://*|git@*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Konvertiert zwischen https://host/pfad(.git) und git@host:pfad(.git).
+# Gibt die Original-URL unverändert zurück, falls das Format nicht erkannt
+# wird (z.B. schon ssh:// oder ein exotisches Schema) - lieber unverändert
+# lassen als etwas Falsches zu erzeugen.
+basher_git_url_to_ssh() {
+    local url="$1"
+    case "$url" in
+        https://*|http://*)
+            local rest host path
+            rest="${url#*://}"
+            host="${rest%%/*}"
+            path="${rest#*/}"
+            printf 'git@%s:%s\n' "$host" "$path"
+            ;;
+        *)
+            printf '%s\n' "$url"
+            ;;
+    esac
+}
+
+basher_git_url_to_https() {
+    local url="$1"
+    case "$url" in
+        git@*)
+            local rest host path
+            rest="${url#git@}"
+            host="${rest%%:*}"
+            path="${rest#*:}"
+            printf 'https://%s/%s\n' "$host" "$path"
+            ;;
+        *)
+            printf '%s\n' "$url"
+            ;;
+    esac
+}
+
+# Zentrale Logik für 'basher repo set' UND den Config-Walkthrough (s.
+# lib/commands/config.sh) - eine Eingabe kann ein lokaler Pfad ODER eine
+# Git-URL sein:
+#   - lokaler Pfad: setzt nur REPO_PATH (bisheriges Verhalten, unverändert).
+#   - Git-URL: fragt (sofern nicht per protocol-Parameter vorgegeben) ob
+#     SSH oder HTTPS genutzt werden soll, konvertiert bei Bedarf, setzt
+#     REPO_URL, und klont nach REPO_PATH (falls dort noch nichts liegt)
+#     bzw. aktualisiert den 'origin'-Remote eines bereits vorhandenen
+#     Git-Repos - klont/überschreibt nie ungefragt in ein nicht-leeres,
+#     nicht-Git-Verzeichnis hinein.
+basher_repo_set_smart() {
+    local input="$1" protocol="${2:-}"
+
+    if ! basher_looks_like_git_url "$input"; then
+        basher_config_set REPO_PATH "$input"
+        echo "basher: REPO_PATH gesetzt auf '$input'"
+        return 0
+    fi
+
+    command -v git > /dev/null 2>&1 || basher_die "git wird benötigt, um eine Repo-URL zu nutzen."
+
+    if [ -z "$protocol" ]; then
+        local choice
+        read -r -p "SSH oder HTTPS für Push/Pull nutzen? [ssh/$(basher_bold https)]: " choice
+        case "$choice" in
+            ssh|SSH) protocol="ssh" ;;
+            *) protocol="https" ;;
+        esac
+    fi
+
+    local final_url
+    if [ "$protocol" = "ssh" ]; then
+        final_url="$(basher_git_url_to_ssh "$input")"
+    else
+        final_url="$(basher_git_url_to_https "$input")"
+    fi
+
+    local default_target
+    default_target="$(basher_config_default REPO_PATH)"
+    local target
+    read -r -p "Zielpfad [$(basher_bold "$default_target")]: " target
+    [ -z "$target" ] && target="$default_target"
+
+    if [ -d "$target" ] && [ "$(ls -A "$target" 2>/dev/null)" ]; then
+        if basher_repo_is_git "$target"; then
+            if git -C "$target" remote | grep -qx origin; then
+                git -C "$target" remote set-url origin "$final_url" || basher_die "Konnte Remote-URL nicht setzen."
+            else
+                git -C "$target" remote add origin "$final_url" || basher_die "Konnte Remote 'origin' nicht anlegen."
+            fi
+            echo "basher: Remote 'origin' von '$target' auf '$final_url' gesetzt."
+        else
+            basher_die "'$target' existiert bereits, ist nicht leer und kein Git-Repo - breche ab, statt etwas zu überschreiben. Wähle einen anderen REPO_PATH oder räume manuell auf."
+        fi
+    else
+        mkdir -p "$(dirname "$target")"
+        git clone "$final_url" "$target" || basher_die "Klonen von '$final_url' fehlgeschlagen."
+        echo "basher: '$final_url' nach '$target' geklont."
+    fi
+
+    basher_config_set REPO_PATH "$target"
+    basher_config_set REPO_URL "$final_url"
 }
 
 # Nur der Pull-Teil, für den Pre-Pull vor new/edit (s. 5.2/5.3). Bricht bei
@@ -799,20 +931,48 @@ cmd_config() {
 }
 
 basher_config_walkthrough() {
-    echo "basher Config-Walkthrough - Enter übernimmt jeweils den aktuellen/Default-Wert."
+    cat << 'BANNER'
+___.                    .__                     
+\_ |__  _____     ______|  |__    ____ _______  
+ | __ \ \__  \   /  ___/|  |  \ _/ __ \\_  __ \ 
+ | \_\ \ / __ \_ \___ \ |   Y  \\  ___/ |  | \/ 
+ |___  /(____  //____  >|___|  / \___  >|__|    
+     \/      \/      \/      \/      \/         
+                                                
+                     config
+BANNER
     echo
 
-    local key current input
+    local key current input hint
     for key in "${BASHER_DEFAULT_KEYS[@]}"; do
         # INSTALL_MODE ist bewusst kein Teil des normalen Walkthroughs,
         # s. Architekturplan Abschnitt 8 (nur install.sh / Debug-'config set').
+        # REPO_URL wird nicht direkt abgefragt, sondern automatisch gesetzt,
+        # wenn bei REPO_PATH eine Git-URL statt eines Pfads eingegeben wird
+        # (s. basher_repo_set_smart in lib/repo.sh).
         [ "$key" = "INSTALL_MODE" ] && continue
+        [ "$key" = "REPO_URL" ] && continue
 
         current="$(basher_config_get "$key")"
         [ -z "$current" ] && current="$(basher_config_default "$key")"
 
+        hint="$(basher_config_hint "$key")"
+        [ -n "$hint" ] && echo "  $hint"
+
+        if [ "$key" = "REPO_PATH" ]; then
+            read -r -p "$key [$(basher_bold "$current")]: " input
+            [ -z "$input" ] && input="$current"
+            if basher_looks_like_git_url "$input"; then
+                basher_repo_set_smart "$input"
+            else
+                basher_config_set REPO_PATH "$input"
+            fi
+            echo
+            continue
+        fi
+
         while true; do
-            read -r -p "$key [$current]: " input
+            read -r -p "$key [$(basher_bold "$current")]: " input
             [ -z "$input" ] && input="$current"
             if basher_config_validate "$key" "$input"; then
                 break
@@ -821,9 +981,9 @@ basher_config_walkthrough() {
         done
 
         basher_config_set "$key" "$input"
+        echo
     done
 
-    echo
     echo "basher: Config gespeichert unter $BASHER_CONFIG_FILE"
 }
 
@@ -860,7 +1020,7 @@ cmd_edit() {
 
     local current_desc new_desc
     current_desc="$(basher_manifest_get_description "$REPO_PATH" "$relpath")"
-    read -r -p "Kurzbeschreibung [$current_desc]: " new_desc
+    read -r -p "Kurzbeschreibung [$(basher_bold "$current_desc")]: " new_desc
     [ -z "$new_desc" ] && new_desc="$current_desc"
     basher_manifest_add "$REPO_PATH" "$script_path" "$new_desc"
 
@@ -879,6 +1039,116 @@ basher_edit_pick_fzf() {
 
     grep -v '^#' "$manifest" | grep -v '^$' | cut -d'|' -f1 | \
         fzf --prompt="Script bearbeiten> " --preview="cat '$REPO_PATH/{}'"
+}
+
+# ===== lib/commands/help.sh =====
+# lib/commands/help.sh - basher -h/--help (kurz) und basher help (ausführlich)
+
+cmd_help() {
+    cat << 'EOF'
+basher - ein einfacher Bash-Script-Manager
+
+Nutzung: basher <befehl> [argumente]
+
+Scripts erstellen & bearbeiten:
+  new [name] [--category pfad]    Neues Script anlegen
+  tmp                             Temporäres Script anlegen, ausführen, danach löschen
+  edit [name]                     Bestehendes Script bearbeiten
+
+Scripts finden & ausführen:
+  list                            Alle Scripts als Textliste
+  menu                            Interaktives fzf-Menü (nur Vollinstallation)
+  run <name> [--repo o/r] [-- args]
+                                   Script ausführen, lokal oder aus fremdem GitHub-Repo
+
+Konfiguration:
+  config get|set|path|edit        Konfiguration lesen/ändern
+
+Script-Repo:
+  repo scan|set|sync
+
+Secrets:
+  secrets set|get|list|edit|encrypt|decrypt
+
+Sonstiges:
+  version                         Diagnose-Ausgabe
+  help                             Ausführliche Hilfe mit Beispielen
+  -h, --help                      Diese Übersicht
+EOF
+}
+
+cmd_help_full() {
+    cat << 'EOF'
+basher - ein einfacher Bash-Script-Manager
+
+Verwaltet, kategorisiert und führt eigene Bash-Scripts aus. Kategorisierung erfolgt über die
+Ordnerstruktur eines konfigurierbaren Script-Repos. Läuft lokal installiert (mit optionalem
+interaktivem fzf-Menü) oder minimal per curl-Pipe ohne jede Installation.
+
+BEFEHLE
+
+  new [name] [--category pfad]
+      Neues Script anlegen. Fehlt der Name, wird interaktiv gefragt.
+      Beispiel: basher new backup --category apps/borg
+
+  tmp
+      Temporäres Script anlegen, im Editor öffnen, ausführen, danach löschen.
+      Landet nie im Script-Repo.
+
+  edit [name]
+      Bestehendes Script bearbeiten. Ohne Namen im Voll-Modus per fzf-Picker.
+      Name kann Basename oder voller Pfad sein, mit oder ohne .sh.
+
+  list
+      Alle Scripts als Textliste, gruppiert nach Verzeichnis.
+
+  menu
+      Interaktives fzf-Menü mit Preview (nur Vollinstallation).
+      Enter führt aus, Ctrl-E bearbeitet, Esc bricht ab.
+
+  run <name> [--repo owner/repo] [-- argumente]
+      Script ausführen, ohne es zu öffnen. Ohne --repo lokal aus dem konfigurierten
+      Script-Repo, mit --repo ad-hoc aus einem beliebigen öffentlichen GitHub-Repo.
+      Beispiel: basher run backup --repo someone/scripts -- --dry-run
+
+  config get|set|path|edit
+      Konfiguration lesen bzw. ändern. Ohne Argument (nur Vollinstallation):
+      interaktiver Walkthrough mit Erklärung zu jeder Einstellung.
+
+  repo scan [pfad]
+      Erzeugt/aktualisiert das Manifest aus einer bestehenden Ordnerstruktur
+      (neue Scripts ergänzen, verschwundene entfernen, Beschreibungen bleiben erhalten).
+
+  repo set <pfad-oder-url> [--ssh|--https]
+      Aktives Script-Repo wechseln. Bei einer Git-URL wird automatisch geklont
+      bzw. der Remote aktualisiert, inkl. Abfrage/Konvertierung SSH <-> HTTPS.
+
+  repo sync
+      Git-Repo synchronisieren. Verhalten hängt von SYNC_MODE ab:
+      auto = automatisch pull --rebase + push, pro = nur Status anzeigen.
+
+  secrets set|get|list|edit|encrypt|decrypt
+      Secrets verwalten. Landen automatisch als Umgebungsvariablen in per
+      run/tmp ausgeführten Scripts. encrypt/decrypt wechseln zwischen
+      Klartext und GPG-Verschlüsselung.
+
+  version
+      Diagnose-Ausgabe: Version, Installationsmodus, Script-Repo-Pfad, Config-Pfad.
+
+KONFIGURATION
+
+  Liegt unter ~/.config/basher/config, wird beim ersten Full-Install automatisch
+  über einen interaktiven Walkthrough eingerichtet (jederzeit erneut: basher config).
+  Wichtige Keys: REPO_PATH, EDITOR_CMD, AUTO_COMMIT, SYNC_MODE, SECRETS_MODE.
+
+DATEIEN
+
+  ~/.config/basher/config              Konfiguration
+  ~/.config/basher/secrets.env(.gpg)   Secrets
+  <REPO_PATH>/manifest.idx             Verzeichnis aller Scripts im Script-Repo
+
+Vollständige Architektur-Dokumentation: docs/architecture.md im basher-Repository.
+EOF
 }
 
 # ===== lib/commands/list.sh =====
@@ -1046,9 +1316,13 @@ cmd_repo() {
             basher_repo_sync "$REPO_PATH"
             ;;
         set)
-            [ $# -ge 1 ] || basher_die "Nutzung: basher repo set <pfad>"
-            basher_config_set REPO_PATH "$1"
-            echo "basher: REPO_PATH gesetzt auf '$1'"
+            [ $# -ge 1 ] || basher_die "Nutzung: basher repo set <pfad-oder-url> [--ssh|--https]"
+            local input="$1" protocol=""
+            case "${2:-}" in
+                --ssh) protocol="ssh" ;;
+                --https) protocol="https" ;;
+            esac
+            basher_repo_set_smart "$input" "$protocol"
             ;;
         "")
             basher_die "Nutzung: basher repo <scan|set|sync> [Argumente]"
@@ -1269,12 +1543,23 @@ cmd_version() {
 # ===== Dispatcher (entspricht bin/basher, s. 1.4) =====
 basher_config_load
 
-if [ "$#" -gt 0 ]; then
-    cmd="cmd_$1"
-    shift
-else
-    cmd="cmd_menu"
-fi
+case "${1:-}" in
+    -h|--help)
+        cmd="cmd_help"
+        shift
+        ;;
+    help)
+        cmd="cmd_help_full"
+        shift
+        ;;
+    "")
+        cmd="cmd_menu"
+        ;;
+    *)
+        cmd="cmd_$1"
+        shift
+        ;;
+esac
 
 if declare -f "$cmd" > /dev/null 2>&1; then
     "$cmd" "$@"

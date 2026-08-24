@@ -31,7 +31,7 @@ cmd_edit() {
 
     local current_desc new_desc
     current_desc="$(basher_manifest_get_description "$REPO_PATH" "$relpath")"
-    read -r -p "Kurzbeschreibung [$current_desc]: " new_desc
+    read -r -p "Kurzbeschreibung [$(basher_bold "$current_desc")]: " new_desc
     [ -z "$new_desc" ] && new_desc="$current_desc"
     basher_manifest_add "$REPO_PATH" "$script_path" "$new_desc"
 

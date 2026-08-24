@@ -40,6 +40,21 @@ basher_config_default() {
     esac
 }
 
+# Kurze, für den interaktiven Walkthrough gedachte Erklärung pro Key.
+basher_config_hint() {
+    case "$1" in
+        REPO_PATH)         echo "Lokaler Pfad zu deinem Script-Repo. Du kannst hier auch eine Git-URL (https://... oder git@...) eingeben - wird dann automatisch geklont bzw. als Remote verknüpft." ;;
+        EDITOR_CMD)        echo "Editor-Override. Leer lassen, um automatisch \$EDITOR bzw. nvim/vim/vi zu verwenden." ;;
+        TMP_DIR)           echo "Ablageort für Wegwerf-Scripts ('basher tmp'). Landet nie im Script-Repo." ;;
+        AUTO_SYNTAX_CHECK) echo "Prüft Tmp-Scripts vor der Ausführung mit 'bash -n' (nur Warnung, kein Blocker). true/false." ;;
+        AUTO_COMMIT)       echo "Committet nach 'new'/'edit' automatisch lokal (und bei SYNC_MODE=auto zusätzlich automatisch push). true/false." ;;
+        SYNC_MODE)         echo "'auto' synchronisiert Git automatisch (pull+push), 'pro' zeigt nur den Status und überlässt dir die Kontrolle." ;;
+        SECRETS_MODE)      echo "'plain' speichert Secrets im Klartext, 'gpg' verschlüsselt sie. Wechsel jederzeit über 'basher secrets encrypt/decrypt'." ;;
+        SECRETS_FILE)      echo "Pfad zur Secrets-Datei (Klartext-Variante; im gpg-Modus wird automatisch .gpg angehängt)." ;;
+        *)                 echo "" ;;
+    esac
+}
+
 basher_config_write_defaults() {
     mkdir -p "$BASHER_CONFIG_DIR"
     {

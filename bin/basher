@@ -43,14 +43,25 @@ done
 basher_config_load
 
 # --- Befehl auflösen -----------------------------------------------------
-if [ "$#" -gt 0 ]; then
-    cmd="cmd_$1"
-    shift
-else
-    # Kein Argument -> Menü (nur Voll-Modus, s. 5.4). Guard in cmd_menu
-    # selbst wirft im Minimal-Modus eine passende Fehlermeldung.
-    cmd="cmd_menu"
-fi
+case "${1:-}" in
+    -h|--help)
+        cmd="cmd_help"
+        shift
+        ;;
+    help)
+        cmd="cmd_help_full"
+        shift
+        ;;
+    "")
+        # Kein Argument -> Menü (nur Voll-Modus, s. 5.4). Guard in cmd_menu
+        # selbst wirft im Minimal-Modus eine passende Fehlermeldung.
+        cmd="cmd_menu"
+        ;;
+    *)
+        cmd="cmd_$1"
+        shift
+        ;;
+esac
 
 if declare -f "$cmd" > /dev/null 2>&1; then
     "$cmd" "$@"

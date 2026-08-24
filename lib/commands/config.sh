@@ -41,20 +41,48 @@ cmd_config() {
 }
 
 basher_config_walkthrough() {
-    echo "basher Config-Walkthrough - Enter übernimmt jeweils den aktuellen/Default-Wert."
+    cat << 'BANNER'
+___.                    .__                     
+\_ |__  _____     ______|  |__    ____ _______  
+ | __ \ \__  \   /  ___/|  |  \ _/ __ \\_  __ \ 
+ | \_\ \ / __ \_ \___ \ |   Y  \\  ___/ |  | \/ 
+ |___  /(____  //____  >|___|  / \___  >|__|    
+     \/      \/      \/      \/      \/         
+                                                
+                     config
+BANNER
     echo
 
-    local key current input
+    local key current input hint
     for key in "${BASHER_DEFAULT_KEYS[@]}"; do
         # INSTALL_MODE ist bewusst kein Teil des normalen Walkthroughs,
         # s. Architekturplan Abschnitt 8 (nur install.sh / Debug-'config set').
+        # REPO_URL wird nicht direkt abgefragt, sondern automatisch gesetzt,
+        # wenn bei REPO_PATH eine Git-URL statt eines Pfads eingegeben wird
+        # (s. basher_repo_set_smart in lib/repo.sh).
         [ "$key" = "INSTALL_MODE" ] && continue
+        [ "$key" = "REPO_URL" ] && continue
 
         current="$(basher_config_get "$key")"
         [ -z "$current" ] && current="$(basher_config_default "$key")"
 
+        hint="$(basher_config_hint "$key")"
+        [ -n "$hint" ] && echo "  $hint"
+
+        if [ "$key" = "REPO_PATH" ]; then
+            read -r -p "$key [$(basher_bold "$current")]: " input
+            [ -z "$input" ] && input="$current"
+            if basher_looks_like_git_url "$input"; then
+                basher_repo_set_smart "$input"
+            else
+                basher_config_set REPO_PATH "$input"
+            fi
+            echo
+            continue
+        fi
+
         while true; do
-            read -r -p "$key [$current]: " input
+            read -r -p "$key [$(basher_bold "$current")]: " input
             [ -z "$input" ] && input="$current"
             if basher_config_validate "$key" "$input"; then
                 break
@@ -63,8 +91,8 @@ basher_config_walkthrough() {
         done
 
         basher_config_set "$key" "$input"
+        echo
     done
 
-    echo
     echo "basher: Config gespeichert unter $BASHER_CONFIG_FILE"
 }

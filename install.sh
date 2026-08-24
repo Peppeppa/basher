@@ -4,8 +4,10 @@
 # Installiert einen dünnen Wrapper nach ~/.local/bin/basher, der per exec auf
 # den absoluten Pfad DIESES Repos zeigt (kein sudo, kein systemweiter Eingriff,
 # kein Symlink - vermeidet damit jede Symlink-Auflösungs-Problematik in
-# bin/basher selbst). Fragt Minimal/Voll ab (oder nimmt --minimal/--full),
-# prüft/installiert bei Voll optional fzf, und setzt INSTALL_MODE in der Config.
+# bin/basher selbst). Default ist die Vollinstallation (wer klont, will
+# vermutlich das komplette Erlebnis) - --minimal für die schlanke Variante
+# ohne fzf-Abhängigkeit. Bei Vollinstallation läuft im Anschluss automatisch
+# der Config-Walkthrough (s. lib/commands/config.sh).
 
 set -uo pipefail
 
@@ -14,10 +16,11 @@ INSTALL_BIN_DIR="$HOME/.local/bin"
 
 usage() {
     echo "Nutzung: install.sh [--minimal|--full]" >&2
+    echo "  Ohne Option: Vollinstallation (Default)." >&2
     exit 1
 }
 
-mode=""
+mode="full"
 for arg in "$@"; do
     case "$arg" in
         --minimal) mode="minimal" ;;
@@ -26,18 +29,6 @@ for arg in "$@"; do
         *) echo "basher: Unbekannte Option: $arg" >&2; usage ;;
     esac
 done
-
-if [ -z "$mode" ]; then
-    echo "basher Installation"
-    echo "  1) Minimal - keine Zusatzpakete, curl/bash-tauglich"
-    echo "  2) Voll    - interaktives Menü via fzf"
-    read -r -p "Auswahl [1/2]: " choice
-    case "$choice" in
-        1) mode="minimal" ;;
-        2) mode="full" ;;
-        *) echo "basher: Ungültige Auswahl, Abbruch." >&2; exit 1 ;;
-    esac
-fi
 
 echo "basher: Installiere im Modus '$mode' ..."
 
@@ -92,4 +83,10 @@ fi
 "$INSTALL_BIN_DIR/basher" config set INSTALL_MODE "$mode" > /dev/null
 
 echo "basher: Installation abgeschlossen (INSTALL_MODE=$mode)."
+
+if [ "$mode" = "full" ]; then
+    echo
+    "$INSTALL_BIN_DIR/basher" config
+fi
+
 echo "basher: Neue Shell starten oder 'source ~/.bashrc', dann 'basher version' zum Testen."

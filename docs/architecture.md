@@ -17,7 +17,8 @@ Nutzer-Scripts gespeichert werden, ist reine Konfigurationssache (siehe 3).
   Pakete außer `curl`/`bash` selbst. Läuft per `curl -fsSL <raw-url> | bash -s -- <command>` ohne
   vorherige Installation, oder lokal installiert via `install.sh --minimal`.
 - **Voll**: lokaler Clone, modulare `lib/*.sh`, nutzt `fzf` für das interaktive Menü.
-- `install.sh` fragt interaktiv Minimal/Voll ab, oder nimmt Flags: `install.sh --minimal|--full`.
+- `install.sh` installiert per Default die Vollversion; `install.sh --minimal` für die schlanke
+  Variante ohne `fzf`-Abhängigkeit. `--full` ist als expliziter Alias ebenfalls gültig.
 
 ### 1.3 Editor & Ausführung
 Fallback-Kette statt hartkodiertem Editor: `EDITOR_CMD` (Config) → `$EDITOR` → `nvim` → `vim` →
@@ -63,6 +64,12 @@ sendet `basher_die` zusätzlich `kill -s TERM "$$"` (referenziert laut Bash-Sema
 von Subshells immer die PID des äußersten Skripts); `bin/basher` sowie das generierte
 Minimal-Bundle fangen `TERM` per Trap ab (`trap 'exit 1' TERM`) und terminieren zuverlässig.
 
+### 1.7 Einheitliche Default-Hervorhebung in Prompts
+`basher_bold` (`lib/core.sh`) umschließt Text mit ANSI-Bold-Codes. Überall dort, wo ein Prompt
+einen Wert zeigt, der bei leerer Eingabe (Enter) übernommen wird, wird dieser Wert fett dargestellt
+(`KEY [Default]:`) statt zusätzlich in Textform erklärt zu werden (z. B. statt „Enter=https“) –
+konsistent über Config-Walkthrough, `repo set` und `edit`.
+
 ---
 
 ## 2. Konfiguration
@@ -77,7 +84,7 @@ YAML/JSON-Parser nötig → Minimal-Modus-kompatibel).
 |---|---|---|
 | `INSTALL_MODE` | `minimal` oder `full` – von `install.sh` gesetzt, zur Laufzeit von Guards geprüft (s. 1.5) | wird bei Installation verpflichtend gesetzt |
 | `REPO_PATH` | Lokaler Pfad zum Script-Repo | `~/.local/share/basher/scripts` |
-| `REPO_URL` | Remote-URL des Script-Repos | leer, wird bei Bedarf gesetzt |
+| `REPO_URL` | Git-URL des Script-Repos, automatisch gesetzt beim Klonen/Verknüpfen (s. 3.3) – kein direktes Walkthrough-Feld | leer |
 | `EDITOR_CMD` | Override für Editor | leer (→ Fallback-Kette 1.3) |
 | `TMP_DIR` | Ablageort temporärer Scripts (Sicherheitsnetz, s. 5.1) | `${TMPDIR:-/tmp}/basher` |
 | `AUTO_SYNTAX_CHECK` | `bash -n` vor Ausführung eines Tmp-Scripts | `true` |
@@ -90,8 +97,11 @@ Werte mit festem Wertebereich (`AUTO_SYNTAX_CHECK`, `AUTO_COMMIT`, `SYNC_MODE`, 
 `INSTALL_MODE`) werden bei `basher config set` validiert; ungültige Werte werden abgelehnt.
 
 ### 2.3 Erststart-Verhalten
-- Voll-Modus: fehlt die Config, interaktive Abfrage der wichtigsten Werte (mit Enter = Default).
-- Minimal-Modus: fehlt die Config, wird sie mit Defaults angelegt (kein Prompt im curl-Fluss).
+- `install.sh` (Default: Vollinstallation) stößt am Ende der Installation den interaktiven
+  Walkthrough (s. 2.4) direkt an – nicht erst beim ersten `basher`-Aufruf, damit die Config nicht
+  von einem zufälligen ersten Befehl abhängt. Jederzeit erneut aufrufbar über `basher config`.
+  `install.sh --minimal` sowie jeder `bin/basher`-Aufruf ohne vorhandene Config legen sie
+  ansonsten still mit Defaults an (`basher_config_load`) – kein Prompt im curl-Fluss.
 - Fehlt ein einzelner Key in einer bereits bestehenden Config (z. B. nach einem basher-Update, das
   einen neuen Key einführt), wird beim Laden nur dieser eine Key mit Default aufgefüllt – additiv,
   kein Config-Versionsfeld nötig.
@@ -100,7 +110,9 @@ Werte mit festem Wertebereich (`AUTO_SYNTAX_CHECK`, `AUTO_COMMIT`, `SYNC_MODE`, 
   als Debug-Hintertür, nicht als beworbener Workflow.
 
 ### 2.4 Config-Subcommands
-- `basher config` – interaktiver Walkthrough (nur Voll-Modus, s. 1.5 `require_full_install`)
+- `basher config` – interaktiver Walkthrough (nur Voll-Modus, s. 1.5 `require_full_install`), zeigt
+  vor jeder Abfrage eine kurze Erklärung des jeweiligen Keys (`basher_config_hint` in
+  `lib/config.sh`)
 - `basher config get <key>`
 - `basher config set <key> <value>`
 - `basher config path` – gibt Pfad zur Config-Datei aus
@@ -123,8 +135,23 @@ tauchen daher auch nicht im Manifest auf.
   ein privates Repo: `GITHUB_TOKEN` als Env-Var, wird als `Authorization`-Header an `curl`
   durchgereicht. Ohne Token ist ein privates Repo im Minimal-Modus nicht erreichbar.
 
-### 3.3 Repo wechseln
-`basher repo set <pfad>` – setzt `REPO_PATH`.
+### 3.3 Repo wechseln: `basher repo set <pfad-oder-url> [--ssh|--https]`
+Erkennt automatisch, ob die Eingabe ein lokaler Pfad oder eine Git-URL ist
+(`basher_looks_like_git_url` in `lib/repo.sh`):
+
+- **Lokaler Pfad**: setzt nur `REPO_PATH`, wie zuvor.
+- **Git-URL** (`https://…`, `git@…`, `ssh://…`): fragt – sofern nicht per `--ssh`/`--https`
+  vorgegeben – interaktiv, ob SSH oder HTTPS für Push/Pull genutzt werden soll (Default fett
+  hervorgehoben statt in Textform ausformuliert, s. 1.7), und konvertiert die URL bei Bedarf
+  zwischen beiden Formaten (`basher_git_url_to_ssh`/`_to_https`). Fragt danach nach dem
+  gewünschten Zielpfad (Default: `~/.local/share/basher/scripts`). Ist der Zielpfad leer/nicht
+  vorhanden, wird die URL dorthin geklont; ist dort bereits ein Git-Repo vorhanden, wird nur der
+  `origin`-Remote aktualisiert. Existiert am Zielpfad bereits etwas anderes (nicht-leer, kein
+  Git-Repo), bricht basher ab statt etwas zu überschreiben. `REPO_URL` wird erst nach
+  erfolgreichem Klonen/Verknüpfen gesetzt – bei einem Fehler bleibt der alte Wert unangetastet.
+
+Dieselbe Logik (`basher_repo_set_smart`) greift auch im Config-Walkthrough (s. 2.4): wird bei der
+`REPO_PATH`-Abfrage eine URL statt eines Pfads eingegeben, läuft automatisch derselbe Ablauf.
 
 ### 3.4 Ad-hoc-Repo in der curl-Variante
 Mit `--repo <owner/repo>` (oder `BASHER_REPO`-Env-Var) referenziert `basher run` bei jedem
@@ -298,24 +325,35 @@ Siehe 2.4.
 
 ### 5.7 `basher repo …`
 - `basher repo scan [pfad]` – siehe 3.7 (Default: `REPO_PATH`)
-- `basher repo set <pfad>` – siehe 3.3
+- `basher repo set <pfad-oder-url> [--ssh|--https]` – siehe 3.3
 - `basher repo sync` – siehe 3.5 (Verhalten abhängig von `SYNC_MODE`)
 
 ### 5.8 `basher secrets …`
 Siehe 4.4.
 
 ### 5.9 `install.sh` / `uninstall.sh`
-- `install.sh [--minimal|--full]`: installiert einen Wrapper nach `~/.local/bin/basher`, der per
-  `exec` auf den absoluten Pfad des Repos zeigt (kein `sudo`, kein Symlink). Voll-Modus
-  prüft/installiert `fzf` über den erkannten Paketmanager (pacman/apt/dnf/brew), warnt statt
-  abzubrechen, falls das nicht klappt. Setzt `INSTALL_MODE` in der Config über `basher config set`
+- `install.sh [--minimal|--full]`: installiert per Default die Vollversion (`--full` als
+  expliziter Alias); `--minimal` für die schlanke Variante. Installiert einen Wrapper nach
+  `~/.local/bin/basher`, der per `exec` auf den absoluten Pfad des Repos zeigt (kein `sudo`, kein
+  Symlink). Voll-Modus prüft/installiert `fzf` über den erkannten Paketmanager
+  (pacman/apt/dnf/brew), warnt statt abzubrechen, falls das nicht klappt, und startet danach direkt
+  den Config-Walkthrough (s. 2.3). Setzt `INSTALL_MODE` in der Config über `basher config set`
   (keine doppelte Logik).
-- `uninstall.sh`: entfernt nur den Wrapper. Fragt getrennt und explizit nach, ob Config bzw.
-  Secrets-Datei (Pfad abhängig vom aktuellen `SECRETS_MODE`, s. 4.1/4.2) ebenfalls gelöscht werden
-  sollen – Default ist in beiden Fällen **Behalten**. Das Script-Repo wird nie angefasst.
+- `uninstall.sh`: entfernt nur den Wrapper (reine Tool-Infrastruktur, keine Rückfrage nötig).
+  Fragt getrennt und explizit nach, ob Config bzw. Secrets-Datei (Pfad abhängig vom aktuellen
+  `SECRETS_MODE`, s. 4.1/4.2) ebenfalls gelöscht werden sollen – Default ist in beiden Fällen
+  **Behalten**. Das Script-Repo wird nie angefasst.
 
 ### 5.10 `basher version`
 Diagnose-Ausgabe: Versionsstring, `INSTALL_MODE`, `REPO_PATH`, Pfad der Config-Datei.
+
+### 5.11 `basher help` / `-h` / `--help`
+Zweistufige Hilfe direkt im Terminal, keine externe `man`-Abhängigkeit (bewusste Entscheidung
+gegen eine Man-Page, s. 8): `-h`/`--help` (`cmd_help`) zeigt eine kompakte Befehlsübersicht, das
+eigenständige `help` (`cmd_help_full`) eine ausführlichere Fassung mit Beispielen, Config- und
+Dateien-Überblick. `bin/basher` (und das Minimal-Bundle-Template) behandeln alle drei Formen als
+Sonderfall vor der generischen `cmd_$1`-Auflösung, da `--help` sonst keinen gültigen
+Funktionsnamen ergäbe.
 
 ---
 
@@ -333,6 +371,7 @@ Diagnose-Ausgabe: Versionsstring, `INSTALL_MODE`, `REPO_PATH`, Pfad der Config-D
 | `basher repo …` | `scan`, `set`, `sync` | ✅ | ✅ |
 | `basher secrets …` | `set`/`get`/`list`/`edit`/`encrypt`/`decrypt` | ✅ | ✅ |
 | `basher version` | Diagnose-Ausgabe | ✅ | ✅ |
+| `basher help` / `-h` / `--help` | Befehlsübersicht | ✅ | ✅ |
 | `install.sh` | Installation | ✅ | ✅ |
 | `uninstall.sh` | Deinstallation | ✅ | ✅ |
 
@@ -361,6 +400,7 @@ basher/
 │   └── commands/                 # ein File pro Subcommand, je eine cmd_<name>()-Funktion (s. 1.4)
 │       ├── config.sh
 │       ├── edit.sh
+│       ├── help.sh
 │       ├── list.sh
 │       ├── menu.sh
 │       ├── new.sh
@@ -390,3 +430,29 @@ Liste, damit auch der curl-Fall abgedeckt ist.
 **`basher_die` aus Command-Substitutions heraus**: `basher_die` beendet zuverlässig den gesamten
 Prozess unabhängig davon, aus welcher Verschachtelungstiefe (auch innerhalb von `$(...)`) es
 aufgerufen wird (s. 1.6) – relevant für praktisch jede Fehlermeldung im Projekt.
+
+**Config-Walkthrough beim Erstaufruf**: lief ursprünglich gar nicht automatisch, obwohl so
+dokumentiert – `basher_config_load` legt die Config immer nur still mit Defaults an. Gefixt, indem
+`install.sh --full` den Walkthrough direkt anstößt (s. 2.3), statt ihn vom zufälligen ersten
+`basher`-Aufruf abhängig zu machen.
+
+**`REPO_URL` war totes Config-Feld**: ursprünglich als Schema-Eintrag vorgesehen, aber nirgends
+tatsächlich für Push/Pull genutzt (Git nutzt seinen eigenen, manuell konfigurierten
+`origin`-Remote). Gefixt durch `basher_repo_set_smart` (s. 3.3): erkennt URLs automatisch, fragt
+SSH/HTTPS ab, klont/verknüpft entsprechend und setzt `REPO_URL` als tatsächlich genutzten Wert.
+
+**`install.sh` Default auf Vollinstallation umgestellt**: ursprünglich fragte `install.sh` ohne
+Flag interaktiv Minimal/Voll ab. Da das Klonen des Repos bereits eine bewusste Entscheidung ist,
+ist „Vollversion" der sinnvollere Default – `--minimal` für die schlanke Variante bleibt explizit
+wählbar, die Auswahlfrage entfällt.
+
+**Man-Page verworfen zugunsten von `basher help`**: eine erste Version installierte eine echte
+`man`-Page nach `~/.local/share/man`. In der Praxis von `man-db`/`MANPATH`-Eigenheiten des
+jeweiligen Systems abhängig und dadurch nicht zuverlässig auffindbar. Ersetzt durch die
+zweistufige `-h`/`--help`/`help`-Lösung direkt in basher selbst (s. 5.11) – keine externe
+Abhängigkeit, funktioniert identisch überall.
+
+**ASCII-Banner im Config-Walkthrough**: ersetzt die vorherige reine Textzeile
+(„basher Config-Walkthrough - Enter übernimmt...“) sowie die zusätzliche Erklärung in `install.sh`
+davor – der Banner (`basher_config_walkthrough` in `lib/commands/config.sh`) macht auf einen Blick
+klar, dass jetzt die Konfiguration folgt, ohne zusätzlichen erklärenden Text.

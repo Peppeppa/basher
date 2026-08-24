@@ -18,16 +18,17 @@ jedem Server ohne vorherige Installation.
 
 ## Installation
 
-### Voll (lokal, mit Menü)
+### Voll (lokal, mit Menü) – Default
 
 ```bash
 git clone https://github.com/Peppeppa/basher.git
 cd basher
-./install.sh --full
+./install.sh
 ```
 
-Richtet einen Wrapper unter `~/.local/bin/basher` ein (kein `sudo`, kein Symlink) und installiert
-`fzf`, falls nicht schon vorhanden.
+Richtet einen Wrapper unter `~/.local/bin/basher` ein (kein `sudo`, kein Symlink), installiert
+`fzf`, falls nicht schon vorhanden, und führt direkt im Anschluss durch die Einrichtung der
+wichtigsten Einstellungen (`basher config`).
 
 ### Minimal (lokal installiert, ohne fzf)
 
@@ -71,6 +72,8 @@ curl -fsSL https://raw.githubusercontent.com/Peppeppa/basher/master/minimal/bash
 | `basher repo sync` | Git-Repo synchronisieren (`SYNC_MODE`-abhängig) |
 | `basher secrets set\|get\|list\|edit\|encrypt\|decrypt` | Secrets verwalten |
 | `basher version` | Diagnose-Ausgabe |
+| `basher help` | Ausführliche Hilfe mit Beispielen |
+| `basher -h` / `--help` | Kurzübersicht der Befehle |
 
 `basher new`/`edit`/`tmp` erkennen automatisch den Editor (`$EDITOR` → `nvim` → `vim` → `vi`,
 override via `EDITOR_CMD`).
@@ -96,11 +99,21 @@ Liegt unter `~/.config/basher/config`, wird beim ersten Start automatisch mit De
 
 Dein Script-Repo ist bewusst getrennt vom basher-Tool selbst. Kategorisierung erfolgt rein über
 die Ordnerstruktur – ein `manifest.idx` im Root listet alle Scripts (Pfad + Kurzbeschreibung) und
-wird automatisch von `new`/`edit`/`repo scan` gepflegt. Für ein bereits bestehendes Script-Repo:
+wird automatisch von `new`/`edit`/`repo scan` gepflegt.
+
+Für ein bereits bestehendes, lokales Script-Repo:
 
 ```bash
 basher config set REPO_PATH /pfad/zu/deinen/scripts
 basher repo scan
+```
+
+Zum Klonen eines Script-Repos von GitHub reicht die HTTPS-URL – `basher` fragt automatisch, ob SSH
+oder HTTPS für künftige Push/Pull-Operationen genutzt werden soll (Default fett markiert),
+konvertiert bei Bedarf, und fragt nach dem gewünschten Zielpfad (Default `~/.local/share/basher/scripts`):
+
+```bash
+basher repo set https://github.com/<user>/<scripts-repo>.git
 ```
 
 ## Secrets

@@ -45,12 +45,23 @@ LIB_FILES=(config.sh checks.sh core.sh repo.sh manifest.sh remote.sh secrets.sh)
 # ===== Dispatcher (entspricht bin/basher, s. 1.4) =====
 basher_config_load
 
-if [ "$#" -gt 0 ]; then
-    cmd="cmd_$1"
-    shift
-else
-    cmd="cmd_menu"
-fi
+case "${1:-}" in
+    -h|--help)
+        cmd="cmd_help"
+        shift
+        ;;
+    help)
+        cmd="cmd_help_full"
+        shift
+        ;;
+    "")
+        cmd="cmd_menu"
+        ;;
+    *)
+        cmd="cmd_$1"
+        shift
+        ;;
+esac
 
 if declare -f "$cmd" > /dev/null 2>&1; then
     "$cmd" "$@"

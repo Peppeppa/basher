@@ -13,9 +13,13 @@ cmd_repo() {
             basher_repo_sync "$REPO_PATH"
             ;;
         set)
-            [ $# -ge 1 ] || basher_die "Nutzung: basher repo set <pfad>"
-            basher_config_set REPO_PATH "$1"
-            echo "basher: REPO_PATH gesetzt auf '$1'"
+            [ $# -ge 1 ] || basher_die "Nutzung: basher repo set <pfad-oder-url> [--ssh|--https]"
+            local input="$1" protocol=""
+            case "${2:-}" in
+                --ssh) protocol="ssh" ;;
+                --https) protocol="https" ;;
+            esac
+            basher_repo_set_smart "$input" "$protocol"
             ;;
         "")
             basher_die "Nutzung: basher repo <scan|set|sync> [Argumente]"
