@@ -75,8 +75,10 @@ konsistent über Config-Walkthrough, `repo set` und `edit`.
 ## 2. Konfiguration
 
 ### 2.1 Speicherort & Format
-`~/.config/basher/config` – einfache `KEY="value"`-Datei, direkt in Bash sourcebar (kein
-YAML/JSON-Parser nötig → Minimal-Modus-kompatibel).
+`~/.config/basher/config` – einfache Bash-kompatible `KEY=VALUE`-Datei, direkt sourcebar (kein
+YAML/JSON-Parser nötig → Minimal-Modus-kompatibel). Schreibzugriffe quotieren Werte über das
+Bash-Builtin `printf %q`; dadurch bleiben Leer- und Sonderzeichen beim späteren `source` reine
+Werte statt Shell-Ausdrücke. Keys werden als gültige Bash-Variablennamen validiert.
 
 ### 2.2 Config-Schema
 
@@ -226,7 +228,13 @@ Idempotent – mehrfaches Ausführen ohne Änderungen am Dateisystem verändert 
 ### 4.1 Default: Plain-Env-Datei
 `SECRETS_FILE` (Default `~/.config/basher/secrets.env`), außerhalb jedes Git-Repos. `chmod 600`
 bei Erstellung; jeder Zugriff (`get`, `list`, `edit`, das Laden vor Script-Ausführung) prüft die
-Dateirechte und korrigiert automatisch bei Abweichung von 600.
+Dateirechte und korrigiert automatisch bei Abweichung von 600. Das Format ist wie bei der Config
+Bash-kompatibles `KEY=VALUE`: Von `basher secrets set` geschriebene Werte werden mit `printf %q`
+quotiert und Keys müssen gültige Bash-Variablennamen sein. Die Datei bleibt damit ohne externen
+Parser direkt sourcebar und für das Minimal-Bundle geeignet.
+Bei manueller Bearbeitung bleibt die Datei bewusst eine vertrauenswürdige Bash-Datei; Nutzer müssen
+dort selbst gültige Zuweisungen schreiben. Der normale `secrets set`-Workflow übernimmt das sichere
+Quoting automatisch.
 
 ### 4.2 Optionales GPG-Toggle
 `basher secrets encrypt` verschlüsselt die bestehende Plain-Datei einmalig symmetrisch (`gpg -c`,
@@ -285,7 +293,9 @@ Tmp-Scripts landen nie im Script-Repo (s. 3.1). Wer ein Tmp-Script dauerhaft beh
 bewusst `basher new`.
 
 ### 5.2 `basher new [name] [--category <pfad>]`
-Fehlt `name`, wird abgefragt. `--category` erzeugt/nutzt Unterordner innerhalb von `REPO_PATH`.
+Fehlt `name`, wird es abgefragt. Wurde kein `--category` übergeben, fragt basher zusätzlich nach
+dem gewünschten Unterordner innerhalb von `REPO_PATH`; eine leere Eingabe wählt bewusst den
+Repo-Root. `--category` überspringt diese Rückfrage und erzeugt/nutzt den angegebenen Unterordner.
 Ist `AUTO_COMMIT=true` und `SYNC_MODE=auto`: erst `git pull --rebase` (s. 3.5), **dann** Datei
 anlegen, Shebang, `chmod +x`, Manifest-Eintrag, Editor öffnen. Nach dem Schließen: lokaler Commit
 + automatischer `repo sync` (Push).
@@ -304,7 +314,9 @@ Verhalten wie `new` (s. 5.2).
 - `list`: reine Textausgabe (Minimal-tauglich), gruppiert nach dem tatsächlichen Verzeichnis jedes
   Eintrags (nicht nur der Top-Level-Kategorie).
 - `menu` bzw. `basher` ohne Argumente (nur Voll-Modus): interaktives fzf-Menü mit Preview-Pane
-  (Scriptinhalt, `bat` falls vorhanden sonst `cat`). Keybindings:
+  (Scriptinhalt, `bat` falls vorhanden sonst `cat`). Angezeigt werden ausschließlich relative
+  Pfade ab `REPO_PATH`; ein eventuell in älteren Manifesten gespeicherter absoluter Repo-Präfix
+  wird vor der Anzeige entfernt. Keybindings:
   - `Enter` → Script direkt **ausführen** (ruft intern denselben Code wie `basher run`)
   - `Ctrl-E` → Script stattdessen zum **Bearbeiten** öffnen (ruft intern `basher edit`)
 

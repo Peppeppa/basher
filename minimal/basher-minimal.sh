@@ -3,7 +3,7 @@
 # NICHT VON HAND BEARBEITEN - Änderungen gehen bei der nächsten Generierung
 # verloren. Quelle der Wahrheit: lib/*.sh in diesem Repo.
 #
-# Generiert am 2026-08-24T12:01:50Z
+# Generiert am 2026-08-24T14:24:24Z
 
 set -uo pipefail
 trap 'exit 1' TERM  # s. Kommentar zu basher_die in lib/checks.sh
@@ -11,8 +11,9 @@ trap 'exit 1' TERM  # s. Kommentar zu basher_die in lib/checks.sh
 # ===== lib/config.sh =====
 # lib/config.sh - Config laden, Defaults setzen, lesen/schreiben
 #
-# Siehe Architekturplan Abschnitt 2. Format: einfache KEY="value"-Datei,
-# direkt in Bash sourcebar (kein YAML/JSON-Parser -> Minimal-Modus-tauglich).
+# Siehe Architekturplan Abschnitt 2. Format: Bash-kompatible KEY=VALUE-Datei,
+# direkt sourcebar. Schreibzugriffe quotieren Werte mit printf %q, damit
+# Sonderzeichen nicht ausgewertet werden (kein externer Parser nötig).
 
 BASHER_CONFIG_DIR="${BASHER_CONFIG_DIR:-$HOME/.config/basher}"
 BASHER_CONFIG_FILE="${BASHER_CONFIG_FILE:-$BASHER_CONFIG_DIR/config}"
@@ -71,7 +72,7 @@ basher_config_write_defaults() {
         echo "# basher config - siehe docs/architecture.md Abschnitt 2.2"
         local key
         for key in "${BASHER_DEFAULT_KEYS[@]}"; do
-            printf '%s="%s"\n' "$key" "$(basher_config_default "$key")"
+            printf '%s=%q\n' "$key" "$(basher_config_default "$key")"
         done
     } > "$BASHER_CONFIG_FILE"
 }
@@ -81,6 +82,10 @@ basher_config_write_defaults() {
 # Begründung in BASHER_CONFIG_VALIDATE_MSG, Rückgabewert 1.
 basher_config_validate() {
     local key="$1" value="$2"
+    if ! [[ "$key" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+        BASHER_CONFIG_VALIDATE_MSG="Ungültiger Config-Key '$key' (erwartet: gültiger Bash-Variablenname)"
+        return 1
+    fi
     case "$key" in
         AUTO_SYNTAX_CHECK|AUTO_COMMIT)
             [[ "$value" == "true" || "$value" == "false" ]] && return 0
@@ -122,7 +127,7 @@ basher_config_load() {
     local key missing=0
     for key in "${BASHER_DEFAULT_KEYS[@]}"; do
         if ! grep -q "^${key}=" "$BASHER_CONFIG_FILE" 2>/dev/null; then
-            printf '%s="%s"\n' "$key" "$(basher_config_default "$key")" >> "$BASHER_CONFIG_FILE"
+            printf '%s=%q\n' "$key" "$(basher_config_default "$key")" >> "$BASHER_CONFIG_FILE"
             missing=1
         fi
     done
@@ -137,7 +142,28 @@ basher_config_load() {
 
 basher_config_get() {
     local key="$1"
+    [[ "$key" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || basher_die "Ungültiger Config-Key '$key'."
     printf '%s\n' "${!key:-}"
+}
+
+# Setzt eine Bash-Zuweisung in einer Datei, ohne den Wert selbst als Code zu
+# interpretieren. printf %q ist Bash-intern und bleibt damit minimal-tauglich.
+basher_assignment_set_in_file() {
+    local file="$1" key="$2" value="$3" tmp encoded found=false line
+    printf -v encoded '%q' "$value"
+    tmp="$(mktemp)"
+
+    {
+        while IFS= read -r line || [ -n "$line" ]; do
+            if [[ "$line" == "$key="* ]]; then
+                printf '%s=%s\n' "$key" "$encoded"
+                found=true
+            else
+                printf '%s\n' "$line"
+            fi
+        done < "$file"
+        [ "$found" = "true" ] || printf '%s=%s\n' "$key" "$encoded"
+    } > "$tmp" && mv "$tmp" "$file"
 }
 
 # Schreibt einen Key persistent in die Config-Datei UND setzt ihn in der
@@ -154,17 +180,7 @@ basher_config_set() {
         basher_config_write_defaults
     fi
 
-    if grep -q "^${key}=" "$BASHER_CONFIG_FILE"; then
-        local tmp
-        tmp="$(mktemp)"
-        awk -v k="$key" -v v="$value" '
-            BEGIN { FS="="; OFS="=" }
-            $1 == k { print k"=\""v"\""; next }
-            { print }
-        ' "$BASHER_CONFIG_FILE" > "$tmp" && mv "$tmp" "$BASHER_CONFIG_FILE"
-    else
-        printf '%s="%s"\n' "$key" "$value" >> "$BASHER_CONFIG_FILE"
-    fi
+    basher_assignment_set_in_file "$BASHER_CONFIG_FILE" "$key" "$value"
 
     declare -g "$key=$value"
 }
@@ -472,7 +488,24 @@ basher_repo_status_only() {
 BASHER_MANIFEST_HEADER="# basher-manifest v1"
 
 basher_manifest_path() {
-    printf '%s\n' "$1/manifest.idx"
+    printf '%s/manifest.idx\n' "${1%/}"
+}
+
+# Normalisiert einen Manifest-Eintrag auf einen Pfad relativ zum Repo. Das
+# hält auch Manifeste nutzbar, die mit einer älteren Version und einem
+# REPO_PATH mit abschließendem Slash als absolute Pfade geschrieben wurden.
+basher_manifest_relpath() {
+    local repo_path="${1%/}" path="$2" relpath
+    case "$path" in
+        "$repo_path"/*)
+            relpath="${path#"$repo_path"/}"
+            # Fängt doppelte Trenner an der Repo-Grenze ab, die ältere
+            # Versionen bei einem REPO_PATH mit abschließendem Slash erzeugten.
+            while [[ "$relpath" == /* ]]; do relpath="${relpath#/}"; done
+            printf '%s\n' "$relpath"
+            ;;
+        *) printf '%s\n' "$path" ;;
+    esac
 }
 
 basher_manifest_ensure() {
@@ -489,14 +522,21 @@ basher_manifest_add() {
 
     basher_manifest_ensure "$repo_path"
     manifest="$(basher_manifest_path "$repo_path")"
-    relpath="${script_path#"$repo_path"/}"
+    relpath="$(basher_manifest_relpath "$repo_path" "$script_path")"
 
     tmp="$(mktemp)"
-    awk -v rp="$relpath" -v desc="$description" -F'|' '
+    awk -v rp="$relpath" -v desc="$description" -v root="${repo_path%/}/" -F'|' '
         BEGIN { OFS="|"; found=0 }
         /^#/ { print; next }
         NF==0 { next }
-        $1 == rp { print rp, desc; found=1; next }
+        {
+            stored=$1
+            if (index(stored, root) == 1) {
+                stored=substr(stored, length(root) + 1)
+                sub(/^\/+/, "", stored)
+            }
+        }
+        stored == rp { print rp, desc; found=1; next }
         { print }
         END { if (!found) print rp, desc }
     ' "$manifest" > "$tmp" && mv "$tmp" "$manifest"
@@ -506,7 +546,15 @@ basher_manifest_get_description() {
     local repo_path="$1" relpath="$2" manifest
     manifest="$(basher_manifest_path "$repo_path")"
     [ -f "$manifest" ] || { echo ""; return 0; }
-    awk -F'|' -v rp="$relpath" '$1==rp {print $2; found=1} END{if(!found) print ""}' "$manifest"
+    local key desc normalized
+    while IFS='|' read -r key desc; do
+        normalized="$(basher_manifest_relpath "$repo_path" "$key")"
+        if [ "$normalized" = "$relpath" ]; then
+            printf '%s\n' "$desc"
+            return 0
+        fi
+    done < "$manifest"
+    echo ""
 }
 
 # Löst eine Nutzereingabe (Name oder Pfad, mit/ohne .sh) zu genau einem
@@ -527,6 +575,7 @@ basher_manifest_resolve() {
     while IFS='|' read -r key desc; do
         [ -z "$key" ] && continue
         [[ "$key" == \#* ]] && continue
+        key="$(basher_manifest_relpath "$repo_path" "$key")"
         key_noext="${key%.sh}"
         if [ "$key_noext" = "$query" ]; then
             exact+=("$key")
@@ -592,7 +641,7 @@ basher_manifest_disambiguate() {
 # Nützlich, um ein bereits per Ordnerstruktur kategorisiertes Repo (das noch
 # kein manifest.idx hat) basher-tauglich zu machen.
 basher_manifest_scan() {
-    local repo_path="$1"
+    local repo_path="${1%/}"
     [ -d "$repo_path" ] || basher_die "'$repo_path' existiert nicht."
 
     basher_manifest_ensure "$repo_path"
@@ -602,7 +651,7 @@ basher_manifest_scan() {
     local found_file rel
     local -A on_disk=()
     while IFS= read -r -d '' found_file; do
-        rel="${found_file#"$repo_path"/}"
+        rel="$(basher_manifest_relpath "$repo_path" "$found_file")"
         on_disk["$rel"]=1
     done < <(find "$repo_path" -type f -name '*.sh' -not -path '*/.*' -print0)
 
@@ -611,6 +660,7 @@ basher_manifest_scan() {
     while IFS='|' read -r key desc; do
         [ -z "$key" ] && continue
         [[ "$key" == \#* ]] && continue
+        key="$(basher_manifest_relpath "$repo_path" "$key")"
         existing_desc["$key"]="$desc"
     done < "$manifest"
 
@@ -786,18 +836,14 @@ basher_secrets_edit() {
 }
 
 basher_secrets_set_in_file() {
-    local file="$1" key="$2" value="$3" tmp
-    tmp="$(mktemp)"
-    awk -v k="$key" -v v="$value" -F'=' '
-        BEGIN { OFS="="; found=0 }
-        $1 == k { print k, "\"" v "\""; found=1; next }
-        { print }
-        END { if (!found) print k "=\"" v "\"" }
-    ' "$file" > "$tmp" && mv "$tmp" "$file"
+    local file="$1" key="$2" value="$3"
+    basher_assignment_set_in_file "$file" "$key" "$value"
 }
 
 basher_secrets_set() {
     local key="$1" value="$2" path
+    [[ "$key" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || \
+        basher_die "Ungültiger Secret-Key '$key' (erwartet: gültiger Bash-Variablenname)."
     path="$(basher_secrets_path)"
 
     if [ "${SECRETS_MODE:-plain}" = "gpg" ]; then
@@ -820,19 +866,32 @@ basher_secrets_set() {
 }
 
 basher_secrets_get() {
-    local key="$1" path value
+    local key="$1" path
+    [[ "$key" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] || basher_die "Ungültiger Secret-Key '$key'."
     path="$(basher_secrets_path)"
     [ -f "$path" ] || basher_die "Keine Secrets-Datei vorhanden."
     basher_secrets_check_perms
 
     if [ "${SECRETS_MODE:-plain}" = "gpg" ]; then
-        value="$(gpg -d --quiet "$path" 2>/dev/null | awk -F'=' -v k="$key" '$1==k{sub(/^[^=]*=/,""); gsub(/^"|"$/,""); print; exit}')"
+        command -v gpg > /dev/null 2>&1 || basher_die "gpg nicht gefunden."
+        if ! gpg -d --quiet "$path" 2>/dev/null | bash -c '
+            key="$1"
+            source /dev/stdin
+            [[ -v $key ]] || exit 1
+            printf "%s\n" "${!key}"
+        ' _ "$key"; then
+            basher_die "Kein Secret mit Key '$key' gefunden."
+        fi
     else
-        value="$(awk -F'=' -v k="$key" '$1==k{sub(/^[^=]*=/,""); gsub(/^"|"$/,""); print; exit}' "$path")"
+        if ! (
+            # shellcheck source=/dev/null
+            source "$path"
+            [[ -v $key ]] || exit 1
+            printf '%s\n' "${!key}"
+        ); then
+            basher_die "Kein Secret mit Key '$key' gefunden."
+        fi
     fi
-
-    [ -n "$value" ] || basher_die "Kein Secret mit Key '$key' gefunden."
-    printf '%s\n' "$value"
 }
 
 basher_secrets_list_keys() {
@@ -1051,7 +1110,7 @@ basher - ein einfacher Bash-Script-Manager
 Nutzung: basher <befehl> [argumente]
 
 Scripts erstellen & bearbeiten:
-  new [name] [--category pfad]    Neues Script anlegen
+  new [name] [--category pfad]    Neues Script in einem Unterordner anlegen
   tmp                             Temporäres Script anlegen, ausführen, danach löschen
   edit [name]                     Bestehendes Script bearbeiten
 
@@ -1088,7 +1147,8 @@ interaktivem fzf-Menü) oder minimal per curl-Pipe ohne jede Installation.
 BEFEHLE
 
   new [name] [--category pfad]
-      Neues Script anlegen. Fehlt der Name, wird interaktiv gefragt.
+      Neues Script anlegen. Ohne --category wird auch nach dem gewünschten
+      Unterordner gefragt; eine leere Eingabe legt das Script im Repo-Root an.
       Beispiel: basher new backup --category apps/borg
 
   tmp
@@ -1103,7 +1163,8 @@ BEFEHLE
       Alle Scripts als Textliste, gruppiert nach Verzeichnis.
 
   menu
-      Interaktives fzf-Menü mit Preview (nur Vollinstallation).
+      Interaktives fzf-Menü mit relativen Pfaden ab dem Script-Repo und
+      Preview (nur Vollinstallation).
       Enter führt aus, Ctrl-E bearbeitet, Esc bricht ab.
 
   run <name> [--repo owner/repo] [-- argumente]
@@ -1130,7 +1191,8 @@ BEFEHLE
   secrets set|get|list|edit|encrypt|decrypt
       Secrets verwalten. Landen automatisch als Umgebungsvariablen in per
       run/tmp ausgeführten Scripts. encrypt/decrypt wechseln zwischen
-      Klartext und GPG-Verschlüsselung.
+      Klartext und GPG-Verschlüsselung. Keys sind Bash-Variablennamen;
+      Werte werden beim Speichern Bash-sicher quotiert.
 
   version
       Diagnose-Ausgabe: Version, Installationsmodus, Script-Repo-Pfad, Config-Pfad.
@@ -1167,6 +1229,7 @@ cmd_list() {
     while IFS='|' read -r key desc; do
         [ -z "$key" ] && continue
         [[ "$key" == \#* ]] && continue
+        key="$(basher_manifest_relpath "$REPO_PATH" "$key")"
 
         dir="$(dirname "$key")"
         base="$(basename "$key")"
@@ -1212,8 +1275,18 @@ cmd_menu() {
 
     local selection action key
     selection="$(
-        grep -v '^#' "$manifest" | grep -v '^$' | sort -t'|' -k1,1 |
-        awk -F'|' '{ printf "%s\t%s\n", $1, $2 }' |
+        while IFS='|' read -r manifest_key description; do
+            [ -z "$manifest_key" ] && continue
+            [[ "$manifest_key" == \#* ]] && continue
+
+            # Normalerweise enthält das Manifest bereits relative Pfade. Für
+            # ältere/manuell gepflegte Manifeste schneiden wir REPO_PATH hier
+            # ebenfalls ab, damit fzf nie den kompletten absoluten Pfad zeigt.
+            key="$(basher_manifest_relpath "$REPO_PATH" "$manifest_key")"
+
+            printf '%s\t%s\n' "$key" "$description"
+        done < "$manifest" |
+        sort -t$'\t' -k1,1 |
         fzf --delimiter='\t' --with-nth=1,2 \
             --prompt="basher> " \
             --header="Enter=ausführen  Ctrl-E=bearbeiten  Esc=abbrechen" \
@@ -1237,7 +1310,7 @@ cmd_menu() {
 # lib/commands/new.sh - basher new [name] [--category <pfad>], s. 5.2
 
 cmd_new() {
-    local name="" category=""
+    local name="" category="" category_given=false
 
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -1245,6 +1318,7 @@ cmd_new() {
                 shift
                 [ "$#" -ge 1 ] || basher_die "Nutzung: --category <pfad>"
                 category="$1"
+                category_given=true
                 shift
                 ;;
             --*)
@@ -1267,10 +1341,15 @@ cmd_new() {
     fi
     name="${name%.sh}"
 
-    mkdir -p "$REPO_PATH" || basher_die "Konnte REPO_PATH '$REPO_PATH' nicht anlegen."
+    if [ "$category_given" = "false" ]; then
+        read -r -p "Unterordner im Script-Repo (z.B. system/backup, leer = Wurzel): " category
+    fi
 
-    local target_dir="$REPO_PATH"
-    [ -n "$category" ] && target_dir="$REPO_PATH/$category"
+    local repo_root="${REPO_PATH%/}"
+    mkdir -p "$repo_root" || basher_die "Konnte REPO_PATH '$REPO_PATH' nicht anlegen."
+
+    local target_dir="$repo_root"
+    [ -n "$category" ] && target_dir="$repo_root/$category"
     mkdir -p "$target_dir" || basher_die "Konnte Kategorie-Pfad '$target_dir' nicht anlegen."
 
     local script_path="$target_dir/${name}.sh"
@@ -1529,12 +1608,10 @@ basher_tmp_run_loop() {
 }
 
 # ===== lib/commands/version.sh =====
-# lib/commands/version.sh - kleiner Diagnose-Befehl, v.a. um den Dispatcher
-# (bin/basher, s. 1.4) end-to-end testen zu können, solange new/tmp/edit/... etc.
-# noch nicht existieren.
+# lib/commands/version.sh - Versions- und Diagnose-Ausgabe.
 
 cmd_version() {
-    echo "basher 0.1.0-dev (Grundgerüst)"
+    echo "basher 1.0.0"
     echo "INSTALL_MODE: ${INSTALL_MODE:-nicht gesetzt}"
     echo "REPO_PATH:    ${REPO_PATH:-}"
     echo "Config-Datei: ${BASHER_CONFIG_FILE:-}"

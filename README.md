@@ -13,7 +13,7 @@ jedem Server ohne vorherige Installation.
 - **`edit`/`run`/`list`/`menu`**: bestehende Scripts bearbeiten, ausführen, durchsuchen
 - **Mehrdeutige Namen**: bei mehreren Treffern gibt's eine Auswahl statt eines Fehlers
 - **Git-Sync**: automatischer Pull+Push (`SYNC_MODE=auto`) oder rein manuelle Kontrolle (`=pro`)
-- **Secrets**: einfache Klartext-`.env` oder optional GPG-verschlüsselt, transparent für beide
+- **Secrets**: einfache Bash-kompatible `KEY=VALUE`-Datei oder optional GPG-verschlüsselt
 - **Ad-hoc-Ausführung** von Scripts aus einem beliebigen öffentlichen GitHub-Repo per `--repo`
 
 ## Installation
@@ -44,7 +44,7 @@ auf denen kein interaktives Menü gebraucht wird.
 ### Ohne Installation (curl-Direktausführung, z. B. Headless-Server)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Peppeppa/basher/master/minimal/basher-minimal.sh \
+curl -fsSL https://raw.githubusercontent.com/Peppeppa/basher/main/minimal/basher-minimal.sh \
   | bash -s -- <befehl>
 ```
 
@@ -52,7 +52,7 @@ Läuft direkt aus dem Repo heraus, ganz ohne lokale Installation – ideal für 
 einem fremden Server. Funktioniert auch gegen ein beliebiges anderes öffentliches Script-Repo:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Peppeppa/basher/master/minimal/basher-minimal.sh \
+curl -fsSL https://raw.githubusercontent.com/Peppeppa/basher/main/minimal/basher-minimal.sh \
   | bash -s -- run <script> --repo <anderer-user>/<script-repo>
 ```
 
@@ -60,11 +60,11 @@ curl -fsSL https://raw.githubusercontent.com/Peppeppa/basher/master/minimal/bash
 
 | Befehl | Zweck |
 |---|---|
-| `basher new [name] [--category pfad]` | Neues Script anlegen |
+| `basher new [name] [--category pfad]` | Neues Script anlegen (fragt ohne `--category` nach dem Unterordner) |
 | `basher tmp` | Temporäres Script anlegen, ausführen, danach löschen |
 | `basher edit [name]` | Bestehendes Script bearbeiten (fzf-Picker ohne Argument, Voll-Modus) |
 | `basher list` | Alle Scripts als Textliste, gruppiert nach Verzeichnis |
-| `basher menu` | Interaktives fzf-Menü (Enter=ausführen, Ctrl-E=bearbeiten) |
+| `basher menu` | Interaktives fzf-Menü mit repo-relativen Pfaden (Enter=ausführen, Ctrl-E=bearbeiten) |
 | `basher run <name> [--repo owner/repo] [-- args]` | Script ausführen, lokal oder aus fremdem Repo |
 | `basher config get\|set\|path\|edit` | Konfiguration lesen/ändern |
 | `basher repo scan [pfad]` | Manifest aus vorhandener Ordnerstruktur (neu) erzeugen |
@@ -77,6 +77,9 @@ curl -fsSL https://raw.githubusercontent.com/Peppeppa/basher/master/minimal/bash
 
 `basher new`/`edit`/`tmp` erkennen automatisch den Editor (`$EDITOR` → `nvim` → `vim` → `vi`,
 override via `EDITOR_CMD`).
+
+Bei `basher new` wird ohne `--category` nach dem gewünschten Unterordner innerhalb des
+Script-Repos gefragt. Eine leere Eingabe legt das Script bewusst direkt im Repo-Root an.
 
 ## Konfiguration
 
@@ -125,6 +128,11 @@ basher secrets encrypt   # Wechsel zu GPG-verschlüsselt (symmetrisch)
 ```
 
 Secrets landen automatisch als Umgebungsvariablen in jedem per `run`/`tmp` ausgeführten Script.
+Config und Secrets bleiben bewusst einfache, mit Bash `source` ladbare `KEY=VALUE`-Dateien, damit
+auch die Minimalversion ohne Parser oder Zusatzpakete funktioniert. Von basher geschriebene Werte
+werden mit Bash-`printf %q` sicher quotiert; Keys müssen gültige Bash-Variablennamen sein.
+Bei manueller Bearbeitung über `config edit` bzw. `secrets edit` muss der Inhalt entsprechend
+gültige Bash-Syntax bleiben.
 
 ## Deinstallation
 

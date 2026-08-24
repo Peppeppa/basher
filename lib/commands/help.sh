@@ -8,7 +8,7 @@ basher - ein einfacher Bash-Script-Manager
 Nutzung: basher <befehl> [argumente]
 
 Scripts erstellen & bearbeiten:
-  new [name] [--category pfad]    Neues Script anlegen
+  new [name] [--category pfad]    Neues Script in einem Unterordner anlegen
   tmp                             Temporäres Script anlegen, ausführen, danach löschen
   edit [name]                     Bestehendes Script bearbeiten
 
@@ -45,7 +45,8 @@ interaktivem fzf-Menü) oder minimal per curl-Pipe ohne jede Installation.
 BEFEHLE
 
   new [name] [--category pfad]
-      Neues Script anlegen. Fehlt der Name, wird interaktiv gefragt.
+      Neues Script anlegen. Ohne --category wird auch nach dem gewünschten
+      Unterordner gefragt; eine leere Eingabe legt das Script im Repo-Root an.
       Beispiel: basher new backup --category apps/borg
 
   tmp
@@ -60,7 +61,8 @@ BEFEHLE
       Alle Scripts als Textliste, gruppiert nach Verzeichnis.
 
   menu
-      Interaktives fzf-Menü mit Preview (nur Vollinstallation).
+      Interaktives fzf-Menü mit relativen Pfaden ab dem Script-Repo und
+      Preview (nur Vollinstallation).
       Enter führt aus, Ctrl-E bearbeitet, Esc bricht ab.
 
   run <name> [--repo owner/repo] [-- argumente]
@@ -87,7 +89,8 @@ BEFEHLE
   secrets set|get|list|edit|encrypt|decrypt
       Secrets verwalten. Landen automatisch als Umgebungsvariablen in per
       run/tmp ausgeführten Scripts. encrypt/decrypt wechseln zwischen
-      Klartext und GPG-Verschlüsselung.
+      Klartext und GPG-Verschlüsselung. Keys sind Bash-Variablennamen;
+      Werte werden beim Speichern Bash-sicher quotiert.
 
   version
       Diagnose-Ausgabe: Version, Installationsmodus, Script-Repo-Pfad, Config-Pfad.
